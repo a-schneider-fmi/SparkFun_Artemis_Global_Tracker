@@ -401,8 +401,8 @@ typedef struct
   byte GEOFSTAT[3];           // The geofence status as defined in the u-blox UBX-NAV-GEOFENCE message
   byte USERVAL1;              // User value 1
   byte USERVAL2;              // User value 2
-  union_uint16t USERVAL3;     // User value 3
-  union_uint16t USERVAL4;     // User value 4
+  union_int16t USERVAL3;      // User value 3
+  union_int16t USERVAL4;      // User value 4
   union_uint32t USERVAL5;     // User value 5
   union_uint32t USERVAL6;     // User value 6
   union_float USERVAL7;       // User value 7

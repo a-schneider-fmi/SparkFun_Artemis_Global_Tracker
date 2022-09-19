@@ -72,7 +72,10 @@
 // Artemis Global Tracker pin definitions
 #define spiCS1              4  // D4 can be used as an SPI chip select or as a general purpose IO pin
 #define geofencePin         10 // Input for the ZOE-M8Q's PIO14 (geofence) pin
+#define RFM9xDIO1           11 // DIO1 of RMF9x radio
+#define battTempPin         12 // ADC pin for battery temperature measurement
 #define busVoltagePin       13 // Bus voltage divided by 3 (Analog in)
+#define heatingPin          15 // Output for battery heating control
 #define iridiumSleep        17 // Iridium 9603N ON/OFF (sleep) pin: pull high to enable the 9603N
 #define iridiumNA           18 // Input for the Iridium 9603N Network Available
 #define LED                 19 // White LED
@@ -81,9 +84,13 @@
 #define gnssBckpBatChgEN    44 // GNSS backup battery charge enable; when set as INPUT = disabled, when OUTPUT+LOW = charging.
 #define superCapChgEN       27 // LTC3225 super capacitor charger: pull high to enable the super capacitor charger
 #define superCapPGOOD       28 // Input for the LTC3225 super capacitor charger PGOOD signal
+#define dogTempPin          32 // ADC pin for dog tracker temperature measurement
 #define busVoltageMonEN     34 // Bus voltage monitor enable: pull high to enable bus voltage monitoring (via Q4 and Q3)
 #define spiCS2              35 // D35 can be used as an SPI chip select or as a general purpose IO pin
+#define tempMeasEN          37 // Temperature measurement enable: pull high to enable temperature measurement
 #define iridiumRI           41 // Input for the Iridium 9603N Ring Indicator
+#define RFM9xRST            42 // Reset pin for RFM9x
+#define dogHeatingPin       43 // Output for dogtracker heating control
 // Make sure you do not have gnssEN and iridiumPwrEN enabled at the same time!
 // If you do, bad things might happen to the AS179 RF switch!
 
@@ -93,6 +100,8 @@ SFE_UBLOX_GNSS myGPS;
 
 #include "Tracker_Message_Fields.h" // Include the message field and storage definitions
 trackerSettings myTrackerSettings; // Create storage for the tracker settings in RAM
+
+#include "Tracker_User_Functions.h" // Include definitions for user functions
 
 //#define noTX // Uncomment this line to disable the Iridium SBD transmit if you want to test the code without using message credits
 //#define skipGNSS // Uncomment this line to skip getting a GNSS fix (only valid if noTX is defined too)
@@ -116,6 +125,17 @@ TwoWire agtWire(PIN_AGTWIRE_SDA, PIN_AGTWIRE_SCL); //Create an I2C port using pa
 #include <SparkFun_PHT_MS8607_Arduino_Library.h> //http://librarymanager/All#SparkFun_MS8607
 MS8607 barometricSensor; //Create an instance of the MS8607 object
 #define MS8607_RETRIES 3
+
+#include <SPI.h>
+#include <RadioLib.h>
+RFM96 radio = new Module(spiCS2, spiCS1, RFM9xRST, RFM9xDIO1);
+bool lora_initialized = false;
+// LoRa radio settings
+#define RFM96_FREQ 434.0 // radio carrier frequency in MHz
+#define RFM96_BW 125 // LoRa link bandwidth in kHz
+#define RFM96_SF 12 // LoRa link spreading factor
+#define RFM96_CR 5 // LoRa link coding rate denominator
+#define RFM96_POWER 17 // transmission output power in dBm
 
 // iterationCounter is incremented each time a transmission is attempted.
 // It helps keep track of whether messages are being sent successfully.
@@ -306,6 +326,22 @@ void setup()
   pinMode(busVoltageMonEN, OUTPUT); // Make the Bus Voltage Monitor Enable an output
   digitalWrite(busVoltageMonEN, LOW); // Set it low to disable the measurement to save power
   analogReadResolution(14); //Set resolution to 14 bit
+
+  pinMode(tempMeasEN, OUTPUT); // Make the temperature measurement enable an output.
+  digitalWrite(tempMeasEN, LOW); // Set it low to disable the measurement to save power.
+  pinMode(heatingPin, OUTPUT); // Make the heating control pin an output.
+  pinMode(dogHeatingPin, OUTPUT);
+
+  // Initialize the LoRa modem.
+  Serial.print(F("RFM96 initializing ... "));
+  int state = radio.begin(RFM96_FREQ, RFM96_BW, RFM96_SF, RFM96_CR, RADIOLIB_SX127X_SYNC_WORD, RFM96_POWER);
+  if (state == RADIOLIB_ERR_NONE) {
+    Serial.println(F("success!"));
+    lora_initialized = true;
+  } else {
+    Serial.print(F("failed, code "));
+    Serial.println(state);
+  }
 
   // Initialise the globals
   iterationCounter = 0; // Make sure iterationCounter is set to zero (indicating a reset)
@@ -541,6 +577,8 @@ void loop()
       if (alarmType) {
         ALARM_FUNC(alarmType); // Execute alarm user function
       }
+      // Trigger user measurements from external sensors.
+      triggerUserMeasurements();
 
       loop_step = start_GPS; // Get ready to move on and start the GPS
 
